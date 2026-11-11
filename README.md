@@ -1,6 +1,6 @@
 # Bible
 
-A playful Android Bible app built around a **one-year reading plan** and a **daily streak**, with chunky, tactile buttons that pop when you press them.
+A playful Android Bible app built around a **one-year reading plan** and **daily streak**..
 
 <p align="center">
   <img src="docs/screenshots/path.png" width="23%" alt="Reading plan path" />
