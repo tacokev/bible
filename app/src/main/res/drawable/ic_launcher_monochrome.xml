@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same glyph for Android 13+ themed icons (the system recolours it). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
+        android:pathData="M43,32h22a4,4 0 0 1 4,4v36a4,4 0 0 1 -4,4h-22a4,4 0 0 1 -4,-4v-36a4,4 0 0 1 4,-4z M52.25,38h3.5a0.75,0.75 0 0 1 0.75,0.75v4.75h5a0.75,0.75 0 0 1 0.75,0.75v3a0.75,0.75 0 0 1 -0.75,0.75h-5v9.25a0.75,0.75 0 0 1 -0.75,0.75h-3.5a0.75,0.75 0 0 1 -0.75,-0.75v-9.25h-5a0.75,0.75 0 0 1 -0.75,-0.75v-3a0.75,0.75 0 0 1 0.75,-0.75h5v-4.75a0.75,0.75 0 0 1 0.75,-0.75z M44,66.5h25v3h-25z" />
+</vector>
