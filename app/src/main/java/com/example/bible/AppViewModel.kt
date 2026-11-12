@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bible.data.BibleRepository
+import com.example.bible.data.Books
 import com.example.bible.data.Chapter
 import com.example.bible.data.CompletionResult
 import com.example.bible.data.ProgressStore
@@ -45,6 +46,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val translations = library.all
     private val store = ProgressStore(app, library)
     val progress = store.state
+    /** Reads chapters aloud with the on-device TTS engine. */
+    val narrator = com.example.bible.data.Narrator.get(app)
+    /** Verse highlights and notes. */
+    val annotations = com.example.bible.data.AnnotationStore(app)
 
     /** Simple back stack; the last entry is on screen. */
     val stack = mutableStateListOf<Screen>(Screen.Home())
@@ -64,7 +69,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         stack.clear()
         stack.add(if (tab != null) home.copy(tab = tab) else home)
     }
-    fun selectTab(tab: Tab) { stack[0] = Screen.Home(tab) }
+    /**
+     * Switching to the Bible tab from another tab reopens the last chapter read (when
+     * [resumeReading] is on); tapping it while already there stays on the book list so you can browse.
+     */
+    fun selectTab(tab: Tab) {
+        val alreadyThere = (stack[0] as? Screen.Home)?.tab == tab
+        stack[0] = Screen.Home(tab)
+        if (tab == Tab.Bible && !alreadyThere && stack.size == 1 && resumeReading) {
+            lastChapter?.let { (book, n) -> push(Screen.Reader(book, n)) }
+        }
+    }
+
+    // ---- Last chapter read (survives restarts) ----
+
+    private val reading = app.getSharedPreferences("reading", Context.MODE_PRIVATE)
+
+    /** The chapter most recently open in the reader, if any. */
+    var lastChapter by mutableStateOf(
+        reading.getString("book", null)
+            ?.takeIf { id -> Books.all.any { it.id == id } }
+            ?.let { id -> id to reading.getInt("chapter", 1).coerceIn(1, Books[id].chapters) }
+    )
+        private set
+
+    /** Setting: reopen the last chapter when coming back to the Bible tab. Off by default. */
+    var resumeReading by mutableStateOf(reading.getBoolean("resume", false))
+        private set
+
+    fun changeResumeReading(on: Boolean) {
+        resumeReading = on
+        reading.edit().putBoolean("resume", on).apply()
+    }
+
+    /** Book the Bible tab should open on: the last one read, if resuming is on. */
+    val resumeBook get() = lastChapter?.first?.takeIf { resumeReading }
+
+    fun rememberChapter(bookId: String, chapter: Int) {
+        if (lastChapter == (bookId to chapter)) return
+        lastChapter = bookId to chapter
+        reading.edit().putString("book", bookId).putInt("chapter", chapter).apply()
+    }
 
     suspend fun chapter(bookId: String, number: Int): Chapter =
         bible.chapter(progress.value.translation, bookId, number)

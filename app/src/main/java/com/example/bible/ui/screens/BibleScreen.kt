@@ -30,6 +30,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import com.example.bible.data.Narrator
+import com.example.bible.ui.components.NarrationLifecycle
+import com.example.bible.ui.components.SpeakButton
+import com.example.bible.ui.components.rememberVerseActions
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,8 +55,11 @@ import com.example.bible.ui.theme.Pop
 
 @Composable
 fun BibleScreen(vm: AppViewModel, progress: Progress, openPicker: () -> Unit) {
-    var newTestament by rememberSaveable { mutableStateOf(false) }
-    var bookId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Open on the book of the last chapter read, so backing out of the reader lands on its
+    // chapter grid rather than the top of the book list.
+    val last = vm.resumeBook
+    var newTestament by rememberSaveable { mutableStateOf(last != null && Books.indexOf(last) >= Books.NT_START) }
+    var bookId by rememberSaveable { mutableStateOf(last) }
     val book = bookId?.let { Books[it] }
 
     BackHandler(enabled = book != null) { bookId = null }
@@ -170,6 +178,23 @@ fun ReaderScreen(vm: AppViewModel, progress: Progress, bookId: String, number: I
         else -> null
     }
 
+    val narrator = vm.narrator
+    val key = Narrator.key(bookId, number)
+    NarrationLifecycle(narrator)
+    // Reading aloud runs through the whole Bible from here. The narrator advances by itself
+    // (even with the screen locked); the page follows it, and paging by hand moves it along.
+    val narrating = narrator.playlistId == "reader"
+    LaunchedEffect(narrator.chapterKey) {
+        if (!narrating) return@LaunchedEffect
+        val (b, n) = narrator.playlist.getOrNull(narrator.index) ?: return@LaunchedEffect
+        if (Narrator.key(b, n) != key) vm.replaceTop(Screen.Reader(b, n))
+    }
+    LaunchedEffect(key) {
+        if (narrating && narrator.chapterKey != key) narrator.jumpTo(Narrator.wholeBible.indexOf(bookId to number))
+    }
+
+    LaunchedEffect(bookId, number) { vm.rememberChapter(bookId, number) }
+
     ImmersiveScaffold(
         resetKey = bookId to number,
         topBar = {
@@ -198,13 +223,30 @@ fun ReaderScreen(vm: AppViewModel, progress: Progress, bookId: String, number: I
             NavPop(Icons.AutoMirrored.Filled.KeyboardArrowLeft, prev != null, Modifier.weight(1f)) {
                 prev?.let { vm.replaceTop(Screen.Reader(it.first, it.second)) }
             }
+            SpeakButton(narrating && narrator.playing, Modifier.weight(1f)) {
+                when {
+                    narrator.playing -> narrator.pause()
+                    narrating && narrator.chapterKey == key -> narrator.resume()
+                    else -> narrator.play(
+                        "reader", Narrator.wholeBible, Narrator.wholeBible.indexOf(bookId to number),
+                        progress.translation.title, fromVerse = verse, load = vm::chapter,
+                    )
+                }
+            }
             NavPop(Icons.AutoMirrored.Filled.KeyboardArrowRight, next != null, Modifier.weight(1f)) {
                 next?.let { vm.replaceTop(Screen.Reader(it.first, it.second)) }
             }
         }
         },
     ) { padding ->
-        ChapterPage(null, chapter, progress.textScale, progress.translation.code, highlightVerse = verse, padding = padding)
+        ChapterPage(null, chapter, progress.textScale, progress.translation.code, highlightVerse = verse, padding = padding,
+            actions = rememberVerseActions(vm, bookId, number) { v ->
+                narrator.play(
+                    "reader", Narrator.wholeBible, Narrator.wholeBible.indexOf(bookId to number),
+                    progress.translation.title, fromVerse = v, load = vm::chapter,
+                )
+            },
+            speakingVerse = narrator.verse.takeIf { narrating && narrator.chapterKey == key })
     }
 }
 

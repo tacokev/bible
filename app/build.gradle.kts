@@ -1,3 +1,5 @@
+import java.net.URI
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -11,6 +13,23 @@ val keystoreProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// sherpa-onnx (runs the on-device Kitten TTS voice) isn't published to Maven, so fetch its
+// release AAR once into app/libs (git-ignored) and check it against a known hash.
+// Pinned to 1.13.x: 2.0 dropped the built-in espeak-ng phonemizer, and its word-list fallback
+// silently skips names it doesn't know (Nebuchadnezzar, Hezekiah, "Adam's", …).
+val sherpaVersion = "1.13.8"
+val sherpaAar = file("libs/sherpa-onnx-static-link-onnxruntime-$sherpaVersion.aar")
+val sherpaSha256 = "b22c3fc1b6a45666d28892bb2f7694beeb77a8362d7ebd77c1a5431ec9435471"
+if (!sherpaAar.exists()) {
+    sherpaAar.parentFile.mkdirs()
+    val url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/${sherpaAar.name}"
+    logger.lifecycle("Downloading $url")
+    val bytes = URI(url).toURL().openStream().use { it.readBytes() }
+    val hash = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    check(hash == sherpaSha256) { "sherpa-onnx AAR checksum mismatch: $hash" }
+    sherpaAar.writeBytes(bytes)
+}
+
 android {
     namespace = "com.example.bible"
     compileSdk {
@@ -21,10 +40,14 @@ android {
         applicationId = "com.example.bible"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // The native TTS library is ~24 MB per ABI, so ship 64-bit ARM only (every current phone;
+        // Pixel 7 and later can't even run 32-bit apps). Add "armeabi-v7a" for old 32-bit phones.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     signingConfigs {
@@ -42,7 +65,7 @@ android {
         release {
             signingConfigs.findByName("release")?.let { signingConfig = it }
             optimization {
-                enable = false
+                enable = true
             }
         }
     }
@@ -74,6 +97,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.media)
+    implementation(files(sherpaAar))
+    implementation(libs.commons.compress)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)

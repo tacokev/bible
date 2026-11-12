@@ -1,6 +1,18 @@
 package com.example.bible.ui.components
 
 import androidx.compose.foundation.background
+import com.example.bible.data.VerseMark
+import com.example.bible.data.HighlightColor
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
@@ -270,8 +282,32 @@ fun WeekRow(activeDates: Set<Long>, modifier: Modifier = Modifier) {
     }
 }
 
+/** Long-press/highlight/note hooks for verses; null where the text isn't interactive. */
+class VerseInteraction(
+    val marks: Map<Int, VerseMark>,
+    /** Verse whose menu is open (drawn as selected). */
+    val selected: Int?,
+    /** [bounds] is the verse's area in window coordinates, to place a popup next to it. */
+    val onLongPress: (verse: Int, bounds: Rect) -> Unit,
+    val onNoteClick: (verse: Int) -> Unit,
+)
+
+/** Background colour for a highlight, tuned for light/dark themes. */
+@Composable
+fun HighlightColor.background(): Color {
+    val dark = LocalNeutrals.current.isDark
+    val base = when (this) {
+        HighlightColor.Yellow -> Color(0xFFFFD43B)
+        HighlightColor.Green -> Color(0xFF69DB7C)
+        HighlightColor.Blue -> Color(0xFF74C0FC)
+        HighlightColor.Pink -> Color(0xFFFF8FB8)
+        HighlightColor.Purple -> Color(0xFFC5A3FF)
+    }
+    return base.copy(alpha = if (dark) 0.32f else 0.45f)
+}
+
 /** Emits a chapter's headings and paragraphs as LazyColumn items. */
-fun LazyListScope.chapterItems(chapter: Chapter, textScale: Float, highlightVerse: Int? = null) {
+fun LazyListScope.chapterItems(chapter: Chapter, textScale: Float, highlightVerse: Int? = null, interaction: VerseInteraction? = null) {
     chapter.blocks.forEachIndexed { i, block ->
         item(key = "b$i") {
             when (block) {
@@ -285,20 +321,27 @@ fun LazyListScope.chapterItems(chapter: Chapter, textScale: Float, highlightVers
                     style = TextStyle(fontFamily = ScriptureFont, fontStyle = FontStyle.Italic, fontSize = 15.sp * textScale, color = Palette.Muted),
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                is Block.Paragraph -> ParagraphText(block, textScale, highlightVerse)
+                is Block.Paragraph -> ParagraphText(block, textScale, highlightVerse, interaction)
             }
         }
     }
 }
 
 @Composable
-private fun ParagraphText(p: Block.Paragraph, textScale: Float, highlightVerse: Int?) {
+private fun ParagraphText(p: Block.Paragraph, textScale: Float, highlightVerse: Int?, interaction: VerseInteraction?) {
     val poetry = p.verses.any { it.isPoetry }
-    val highlight = Palette.Gold.face.copy(alpha = if (LocalNeutrals.current.isDark) 0.28f else 0.35f)
-    val text: AnnotatedString = remember(p, highlightVerse, highlight) {
-        buildAnnotatedString {
+    val gold = Palette.Gold.face.copy(alpha = if (LocalNeutrals.current.isDark) 0.28f else 0.35f)
+    val selectedColor = Palette.Blue.face.copy(alpha = 0.22f)
+    val marks = interaction?.marks.orEmpty()
+    val colors = HighlightColor.entries.associateWith { it.background() }
+    val selected = interaction?.selected
+    // Text plus each verse's character range (number included), for hit-testing long presses.
+    val (text, ranges) = remember(p, highlightVerse, gold, selected, selectedColor, marks, colors) {
+        val ranges = mutableListOf<Pair<Int, IntRange>>()
+        val t = buildAnnotatedString {
             p.verses.forEachIndexed { i, v ->
                 if (i > 0) append(if (poetry) "\n" else " ")
+                val verseStart = length
                 withStyle(
                     SpanStyle(
                         fontFamily = Nunito,
@@ -307,25 +350,83 @@ private fun ParagraphText(p: Block.Paragraph, textScale: Float, highlightVerse: 
                         color = Palette.Blue.face,
                         baselineShift = BaselineShift(0.35f),
                     )
-                ) { append("${v.number} ") }
+                ) { append("${v.number} ") }
                 val start = length
                 v.lines.forEachIndexed { li, line ->
                     if (li > 0) append("\n    ")
                     append(line)
                 }
-                if (v.number == highlightVerse) addStyle(SpanStyle(background = highlight), start, length)
+                // Later styles win where they overlap: user highlight < menu selection < search/speaking.
+                marks[v.number]?.highlight?.let { addStyle(SpanStyle(background = colors.getValue(it)), start, length) }
+                if (v.number == selected) addStyle(SpanStyle(background = selectedColor), start, length)
+                if (v.number == highlightVerse) addStyle(SpanStyle(background = gold), start, length)
+                ranges += v.number to (verseStart until length)
+            }
+        }
+        t to ranges
+    }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val haptics = LocalHapticFeedback.current
+    Column(Modifier.padding(bottom = 12.dp)) {
+        Text(
+            text,
+            style = TextStyle(
+                fontFamily = ScriptureFont,
+                fontSize = 18.sp * textScale,
+                lineHeight = 30.sp * textScale,
+                color = Palette.Ink,
+                textAlign = TextAlign.Start,
+            ),
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .onGloballyPositioned { coords = it }
+                .then(
+                    if (interaction == null) Modifier
+                    else Modifier.pointerInput(p, ranges) {
+                        // Long press only, so a plain tap still reaches the reader (shows/hides its bars).
+                        detectTapGestures(onLongPress = { pos ->
+                            val l = layout ?: return@detectTapGestures
+                            val c = coords ?: return@detectTapGestures
+                            val offset = l.getOffsetForPosition(pos)
+                            val (verse, range) = ranges.firstOrNull { offset in it.second } ?: return@detectTapGestures
+                            val top = l.getLineTop(l.getLineForOffset(range.first))
+                            val bottom = l.getLineBottom(l.getLineForOffset(range.last))
+                            val topLeft = c.localToWindow(Offset(0f, top))
+                            val bottomRight = c.localToWindow(Offset(c.size.width.toFloat(), bottom))
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            interaction.onLongPress(verse, Rect(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y))
+                        })
+                    }
+                ),
+        )
+        // Notes for verses in this paragraph, as small cards under it.
+        p.verses.forEach { v ->
+            val note = marks[v.number]?.note ?: return@forEach
+            Row(
+                Modifier
+                    .padding(top = 6.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Palette.Snow)
+                    .border(2.dp, Palette.Line, RoundedCornerShape(12.dp))
+                    .clickable { interaction?.onNoteClick(v.number) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    "${v.number}",
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp * textScale),
+                    color = Palette.Blue.face,
+                    modifier = Modifier.padding(end = 8.dp, top = 2.dp),
+                )
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp * textScale),
+                    color = Palette.Muted,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
-    Text(
-        text,
-        style = TextStyle(
-            fontFamily = ScriptureFont,
-            fontSize = 18.sp * textScale,
-            lineHeight = 30.sp * textScale,
-            color = Palette.Ink,
-            textAlign = TextAlign.Start,
-        ),
-        modifier = Modifier.padding(bottom = 12.dp),
-    )
 }

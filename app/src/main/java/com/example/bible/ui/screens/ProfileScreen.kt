@@ -15,6 +15,7 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.example.bible.data.Reminders
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -149,6 +150,13 @@ fun ProfileScreen(vm: AppViewModel, progress: Progress, openPicker: () -> Unit) 
         SectionTitle("Settings")
         ReminderCard(vm, progress)
         Spacer(Modifier.height(12.dp))
+        ToggleCard(
+            title = "Continue where I left off",
+            subtitle = "The Bible tab reopens the last chapter you read",
+            checked = vm.resumeReading,
+            onChange = vm::changeResumeReading,
+        )
+        Spacer(Modifier.height(12.dp))
         PopSurface(
             onClick = openPicker,
             modifier = Modifier.fillMaxWidth(),
@@ -208,6 +216,8 @@ fun ProfileScreen(vm: AppViewModel, progress: Progress, openPicker: () -> Unit) 
                 style = TextStyle(fontFamily = ScriptureFont, fontSize = 18.sp * progress.textScale, color = Palette.Ink),
             )
         }
+        Spacer(Modifier.height(12.dp))
+        VoiceCard(vm)
         Spacer(Modifier.height(24.dp))
         PopButton("Reset progress", { confirmReset = true }, Modifier.fillMaxWidth(), colors = Palette.Card, textColor = Palette.Red.face)
         Spacer(Modifier.height(24.dp))
@@ -282,6 +292,34 @@ private fun SizeButton(text: String, onClick: () -> Unit) {
         depth = 3.dp,
     ) {
         Text(text, style = MaterialTheme.typography.titleMedium, color = Palette.Blue.face)
+    }
+}
+
+@Composable
+private fun ToggleCard(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .border(2.dp, Palette.Line, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Palette.Muted)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Palette.Green.face,
+                checkedBorderColor = Palette.Green.face,
+                uncheckedThumbColor = Palette.Faint,
+                uncheckedTrackColor = Palette.Snow,
+                uncheckedBorderColor = Palette.Line,
+            ),
+        )
     }
 }
 
